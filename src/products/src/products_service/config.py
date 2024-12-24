@@ -11,6 +11,7 @@ class Config:
     DDB_TABLE_PRODUCTS              = os.environ.get('DDB_TABLE_PRODUCTS', 'products')
     DDB_TABLE_CATEGORIES            = os.environ.get('DDB_TABLE_CATEGORIES', 'categories')
     DDB_TABLE_PERSONALISED_PRODUCTS = os.environ.get('DDB_TABLE_PERSONALISED_PRODUCTS', 'personalisedproducts')
+    DDB_TABLE_INIT_STATUS          = os.environ.get('DDB_TABLE_INIT_STATUS', 'service-init-status')
     CACHE_PERSONALISED_PRODUCTS     = os.environ.get('CACHE_PERSONALISED_PRODUCTS', "True") == "True"
     IMAGE_ROOT_URL                  = os.environ.get('IMAGE_ROOT_URL')
     WEB_ROOT_URL                    = os.environ.get('WEB_ROOT_URL')

@@ -5,6 +5,34 @@ Description: >
     This template deploys the Retail Demo Store DynamoDB Tables.
 
 Resources:
+  ServiceInitStatus:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: "service_name"
+          AttributeType: "S"
+        - AttributeName: "init_id"
+          AttributeType: "S"
+        - AttributeName: "timestamp"
+          AttributeType: "N"
+      KeySchema:
+        - AttributeName: "service_name"
+          KeyType: "HASH"
+        - AttributeName: "init_id"
+          KeyType: "RANGE"
+      GlobalSecondaryIndexes:
+        - IndexName: "service-timestamp-index"
+          KeySchema:
+            - AttributeName: "service_name"
+              KeyType: "HASH"
+            - AttributeName: "timestamp"
+              KeyType: "RANGE"
+          Projection:
+            ProjectionType: "ALL"
+      BillingMode: "PAY_PER_REQUEST"
+      Tags:
+        - Key: Purpose
+          Value: Service initialization tracking
 
   ProductsTable:
     Type: AWS::DynamoDB::Table
@@ -114,34 +142,30 @@ Resources:
     DependsOn: "ProductsTable"
     Properties:
       AttributeDefinitions:
-        -
-          AttributeName: "id"
+        - AttributeName: "id"
           AttributeType: "S"
-        -
-          AttributeName: "feature"
+        - AttributeName: "feature"
           AttributeType: "S"
-        -
-          AttributeName: "name"
+        - AttributeName: "name"
           AttributeType: "S"
       KeySchema:
-        -
-          AttributeName: "id"
+        - AttributeName: "id"
           KeyType: "HASH"
       BillingMode: "PAY_PER_REQUEST"
       GlobalSecondaryIndexes:
-        -
-          IndexName: "feature-name-index"
+        - IndexName: "feature-name-index"
           KeySchema:
-            -
-              AttributeName: "feature"
+            - AttributeName: "feature"
               KeyType: "HASH"
-            -
-              AttributeName: "name"
+            - AttributeName: "name"
               KeyType: "RANGE"
           Projection:
             ProjectionType: "ALL"
 
 Outputs:
+  ServiceInitStatus:
+    Description: DynamoDB Table for service initialization tracking
+    Value: !Ref ServiceInitStatus
 
   ProductsTable:
     Description: DynamoDB Table for Products

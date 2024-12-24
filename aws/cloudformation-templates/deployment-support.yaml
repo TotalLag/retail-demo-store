@@ -159,6 +159,16 @@ Resources:
       ManagedPolicyArns:
           - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
           - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AWS::StackName}-service-init-status*'
 
   LoadDataLambdaFunction:
     Type: AWS::Lambda::Function
@@ -186,35 +196,100 @@ Resources:
           import cfnresponse
           import time
           import os
+          import json
+
           logger = logging.getLogger()
           logger.setLevel(logging.INFO)
-          def handler(event, context):
-            response_data = {}
-            response_status = cfnresponse.SUCCESS
-            max_retries = 15  # Maximum number of retries - should be less than the timeout
-            retries = 0
-            if event['RequestType'] in ['Create', 'Update']:     
-              url = os.environ['ProductsServiceUrl']
-              request = Request(f"{url}/init", method='POST')
-              while retries < max_retries:
-                  try:
-                      with urlopen(request) as response:
-                          logger.info(f"Product Service init method success: {response.read()}")
-                          # exit while, success.
-                          break
-                  except URLError as e:
-                      retries += 1
-                      print(f"Request failed. Retrying in 30 seconds... (Attempt {retries}/{max_retries})")
-                      print(f"Error: {e}")
-                      time.sleep(30)
 
-              #
-              if retries >= max_retries:
-                  logger.error(f"Error calling product service init: {e.code} : {e.reason}")
-                  response_status = cfnresponse.FAILED
-                  response_data['Message'] = f"Resource {event['RequestType']} failed: {e}"        
-                            
-            cfnresponse.send(event, context, response_status, response_data)
+          def check_service_status(url):
+              """Check service readiness through GET /init."""
+              try:
+                  request = Request(f"{url}/init", method='GET')
+                  with urlopen(request) as response:
+                      if response.status != 200:
+                          return False, "Unhealthy response status"
+                      
+                      status_data = json.loads(response.read().decode('utf-8'))
+                      if not status_data.get('database_connected', False):
+                          return False, "Database not connected"
+                      
+                      current_status = status_data.get('current_status')
+                      if current_status == 'STARTING':
+                          return False, "Initialization in progress"
+                      elif current_status == 'FAILED':
+                          return False, "Previous initialization failed"
+                          
+                      return True, "Service ready"
+              except Exception as e:
+                  return False, f"Status check failed: {str(e)}"
+
+          def wait_for_service(url, max_attempts=12, delay=5):
+              """Wait for service to be ready."""
+              logger.info(f"Checking service status at {url}")
+              
+              for attempt in range(max_attempts):
+                  ready, message = check_service_status(url)
+                  if ready:
+                      logger.info(f"Service ready: {message}")
+                      return True
+                  
+                  if attempt < max_attempts - 1:
+                      logger.warning(f"Service not ready ({attempt + 1}/{max_attempts}): {message}")
+                      time.sleep(delay)
+                  else:
+                      logger.error(f"Service failed to become ready: {message}")
+              
+              return False
+
+          def initialize_products(url):
+              """Start product initialization."""
+              try:
+                  init_id = f"init_{int(time.time())}"
+                  request = Request(
+                      f"{url}/init",
+                      method='POST',
+                      data=json.dumps({'init_id': init_id}).encode(),
+                      headers={'Content-Type': 'application/json'}
+                  )
+                  
+                  with urlopen(request) as response:
+                      if response.status != 200:
+                          logger.error(f"Initialization failed with status {response.status}")
+                          return False
+                      
+                      response_data = json.loads(response.read().decode('utf-8'))
+                      logger.info(f"Initialization response: {response_data}")
+                      return response_data.get('status') == 'success'
+              except Exception as e:
+                  logger.error(f"Initialization error: {str(e)}")
+                  return False
+
+          def handler(event, context):
+              response_data = {}
+              response_status = cfnresponse.SUCCESS
+              
+              if event['RequestType'] in ['Create', 'Update']:
+                  url = os.environ['ProductsServiceUrl']
+                  logger.info(f"Starting initialization process for {url}")
+                  
+                  # Wait for service to be ready
+                  if not wait_for_service(url):
+                      response_status = cfnresponse.FAILED
+                      response_data['Error'] = "Service not ready for initialization"
+                      cfnresponse.send(event, context, response_status, response_data)
+                      return
+                  
+                  # Start initialization
+                  if not initialize_products(url):
+                      response_status = cfnresponse.FAILED
+                      response_data['Error'] = "Product initialization failed"
+                      cfnresponse.send(event, context, response_status, response_data)
+                      return
+                  
+                  response_data['Message'] = "Product initialization successful"
+                  logger.info("Initialization completed successfully")
+              
+              cfnresponse.send(event, context, response_status, response_data)
   
   CustomLoadDataProducts:
     Type: Custom::CustomLoadData

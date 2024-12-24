@@ -21,13 +21,69 @@ CORS(api)
 def welcome():
     return jsonify("Welcome to the Products Web Service"), 200
 
-@api.route('/init', methods=['POST'])
+from products_service import init_status
+import time
+
+@api.route('/init', methods=['GET', 'POST'])
 def init():
-    products_loaded, categories_loaded = product_service.init()
-    return {
-        "products": products_loaded,
-        "categories": categories_loaded
-    }
+    """
+    GET: Returns service health and initialization status
+    POST: Starts initialization if service is healthy
+    """
+    try:
+        # Check DynamoDB connectivity
+        if not init_status.check_db_connection():
+            return jsonify({
+                'status': 'error',
+                'database_connected': False,
+                'error': 'Database connectivity check failed',
+                'timestamp': int(time.time())
+            }), 500
+
+        # For GET requests, return status
+        if request.method == 'GET':
+            current_status = init_status.get_latest_status()
+            return jsonify({
+                'status': 'ready',
+                'database_connected': True,
+                'current_status': current_status.get('status', 'UNKNOWN'),
+                'timestamp': int(time.time())
+            })
+
+        # For POST requests, start initialization
+        init_id = request.json.get('init_id', f"init_{int(time.time())}")
+        
+        # Update status to starting
+        init_status.update_status(init_id, 'STARTING', 'Beginning initialization')
+        
+        # Perform initialization
+        try:
+            products_loaded, categories_loaded = product_service.init()
+            init_status.update_status(init_id, 'COMPLETED', 'Initialization successful')
+            return jsonify({
+                'status': 'success',
+                'products': products_loaded,
+                'categories': categories_loaded,
+                'init_id': init_id
+            }), 200
+        except Exception as e:
+            error_msg = str(e)
+            init_status.update_status(init_id, 'FAILED', error_msg)
+            current_app.logger.error(f"Initialization failed: {error_msg}")
+            return jsonify({
+                'status': 'failed',
+                'error': error_msg,
+                'init_id': init_id
+            }), 500
+
+    except Exception as e:
+        error_msg = str(e)
+        current_app.logger.error(f"Init endpoint error: {error_msg}")
+        return jsonify({
+            'status': 'error',
+            'error': error_msg,
+            'timestamp': int(time.time())
+        }), 500
 
 @api.route('/products/all', methods=['GET'])
 def get_all_products():
